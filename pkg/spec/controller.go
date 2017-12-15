@@ -8,6 +8,8 @@ type ControllerConfig struct {
 
 	// Path to the file containing the grpc server source
 	GrpcServerFilePath string
+
+	SchedulerName string
 }
 
 // AcceleratorVolume represents a host path that must be mounted into

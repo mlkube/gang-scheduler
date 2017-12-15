@@ -91,11 +91,11 @@ func NewTFReplicaSet(clientSet kubernetes.Interface, tfReplicaSpec spec.TfReplic
 func (s *TFReplicaSet) Labels() KubernetesLabels {
 	return KubernetesLabels(map[string]string{
 		"tensorflow.org": "",
-		"job_type":  string(s.Spec.TfReplicaType),
+		"job_type":       string(s.Spec.TfReplicaType),
 		// runtime_id is set by Job.setup, which is called after the TfReplicaSet is created.
 		// this is why labels aren't a member variable.
-		"runtime_id": s.Job.job.Spec.RuntimeId,
-		"tf_job_name": s.Job.job.Metadata.Name,})
+		"runtime_id":  s.Job.job.Spec.RuntimeId,
+		"tf_job_name": s.Job.job.Metadata.Name})
 }
 
 // Transforms the tfconfig to work with grpc_tensorflow_server
@@ -213,6 +213,9 @@ func (s *TFReplicaSet) Create(config *spec.ControllerConfig) error {
 			log.Errorf("There was a problem copying the PodTemplateSpec error; %v", err)
 			return err
 		}
+
+		newPodSpecTemplate.Spec.SchedulerName = config.SchedulerName
+
 		newJ := &batch.Job{
 			ObjectMeta: meta_v1.ObjectMeta{
 				Name:   s.jobName(index),
@@ -496,7 +499,7 @@ func (s *TFReplicaSet) jobName(index int32) string {
 	// The whole job name should be compliant with the DNS_LABEL spec, up to a max length of 63 characters
 	// Thus jobname(40 chars)-replicaType(6 chars)-runtimeId(4 chars)-index(4 chars), also leaving some spaces
 	// See https://github.com/kubernetes/community/blob/master/contributors/design-proposals/architecture/identifiers.md
-	return fmt.Sprintf("%v-%v-%v-%v",fmt.Sprintf("%.40s", s.Job.job.Metadata.Name), strings.ToLower(string(s.Spec.TfReplicaType)), s.Job.job.Spec.RuntimeId, index)
+	return fmt.Sprintf("%v-%v-%v-%v", fmt.Sprintf("%.40s", s.Job.job.Metadata.Name), strings.ToLower(string(s.Spec.TfReplicaType)), s.Job.job.Spec.RuntimeId, index)
 }
 
 func (s *TFReplicaSet) defaultPSConfigMapName() string {

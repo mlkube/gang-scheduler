@@ -35,6 +35,8 @@ var (
 	controllerConfigFile string
 	printVersion         bool
 	grpcServerFile       string
+
+	schedulerName string
 )
 
 var (
@@ -51,6 +53,7 @@ func init() {
 	flag.BoolVar(&printVersion, "version", false, "Show version and quit")
 	flag.DurationVar(&gcInterval, "gc-interval", 10*time.Minute, "GC interval")
 	flag.StringVar(&controllerConfigFile, "controller_config_file", "", "Path to file containing the controller config.")
+	flag.StringVar(&schedulerName, "scheduler", "default", "Name of the scheduler which handles TF jobs.")
 	flag.Parse()
 
 	// Workaround for watching TPR resource.
@@ -83,6 +86,9 @@ func init() {
 		log.Info("No controller_config_file provided; using empty config.")
 	}
 
+	if controllerConfig.SchedulerName == "" {
+		controllerConfig.SchedulerName = schedulerName
+	}
 }
 
 func main() {
