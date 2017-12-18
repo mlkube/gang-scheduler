@@ -89,6 +89,7 @@ func init() {
 	if controllerConfig.SchedulerName == "" {
 		controllerConfig.SchedulerName = schedulerName
 	}
+	controllerConfig.GrpcServerFilePath = "grpc_tensorflow_server/grpc_tensorflow_server.py"
 }
 
 func main() {
