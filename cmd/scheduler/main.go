@@ -84,7 +84,7 @@ func (ks *tfscheduler) Run(client *k8sclient.Client) {
 
 	for {
 		lt := <-ltCh
-		log.Printf("Adding Pods of learning task %s as tasks to scheduler\n", lt.name)
+		log.Printf("Adding Pods of learning task %s as tasks to scheduler\n", lt.id)
 
 		podToNodeBindings := make([]*k8stype.Binding, 0)
 		for _, pod := range lt.pods {

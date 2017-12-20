@@ -15,7 +15,7 @@ import (
 )
 
 type learningTask struct {
-	name               string
+	id                 string
 	tfjob              *spec.TfJob
 	pods               []*k8stype.Pod
 	nrRequiredReplicas int
@@ -90,13 +90,15 @@ func tfJobWatch(jobch chan *spec.TfJob, c *kubernetes.Clientset) {
 		os.Exit(1)
 	}
 
-	jobch <- &list.Items[0]
+	if 0 < len(list.Items) {
+		jobch <- &list.Items[0]
+	}
 
 	version := list.Metadata.ResourceVersion
-	fmt.Printf("initial version: %s\n", version)
 
 	for {
-		result := restcli.Get().RequestURI(fmt.Sprintf("/apis/%s/%s/%s?watch=true&resourceVersion=%s",
+		fmt.Printf("watching version: %s\n", version)
+		result := restcli.Get().RequestURI(fmt.Sprintf("/apis/%s/%s/namespaces/default/%s?watch=true&resourceVersion=%s",
 			spec.CRDGroup, spec.CRDVersion, spec.CRDKindPlural, version)).Do()
 		body, err := result.Raw()
 		if err != nil {
@@ -111,7 +113,7 @@ func tfJobWatch(jobch chan *spec.TfJob, c *kubernetes.Clientset) {
 			os.Exit(1)
 		}
 
-		fmt.Printf("received tfjob object: %v\n", ev.Object)
+		fmt.Printf("received tfjob object: %v\n", ev.Object.Spec.RuntimeId)
 
 		jobch <- ev.Object
 		version = ev.Object.Metadata.ResourceVersion
@@ -129,36 +131,35 @@ func (maker *learningTaskMaker) run() {
 			fmt.Printf("learningTaskMaker: handling newly arrived pod %s\n", pod.PodInfo.Name)
 			var lt *learningTask
 			var ok bool
-			jobName := pod.PodInfo.Labels["tf_job_name"]
-			if lt, ok = maker.learningTasks[jobName]; !ok {
+			jobId := pod.PodInfo.Labels["runtime_id"]
+			if lt, ok = maker.learningTasks[jobId]; !ok {
 				// tf job object isn't observed
 				var orphans []*k8stype.Pod
-				if orphans, ok = maker.orphanPods[jobName]; !ok {
-					maker.orphanPods[jobName] = make([]*k8stype.Pod, 0)
-					orphans = maker.orphanPods[jobName]
+				if orphans, ok = maker.orphanPods[jobId]; !ok {
+					maker.orphanPods[jobId] = make([]*k8stype.Pod, 0)
+					orphans = maker.orphanPods[jobId]
 				}
 				orphans = append(orphans, pod)
 			} else {
 				lt.pods = append(lt.pods, pod)
 
 				if len(lt.pods) == lt.nrRequiredReplicas {
-					fmt.Printf("lt job %s requires %d pods and all of them are ready, launching\n", jobName, lt.nrRequiredReplicas)
+					fmt.Printf("lt job %s requires %d pods and all of them are ready, launching\n", jobId, lt.nrRequiredReplicas)
 					maker.ltCh <- lt
 				}
 			}
 
 		case job := <-jobCh:
-			fmt.Printf("newly arrived job name: %s\n", job.Metadata.Name)
+			jobId := job.Spec.RuntimeId
+			fmt.Printf("newly arrived job ID: %s\n", jobId)
 
-			jobName := job.Metadata.Name
-			if _, ok := maker.learningTasks[jobName]; ok {
-				// FIXME: jobname shouldn't be ID
-				fmt.Printf("duplicated tf job %s\n", jobName)
-				os.Exit(1)
+			if _, ok := maker.learningTasks[jobId]; ok {
+				fmt.Printf("duplicated tf job %s\n", jobId)
+				continue
 			}
 
 			lt := &learningTask{
-				name:  jobName,
+				id:    jobId,
 				tfjob: job,
 				pods:  make([]*k8stype.Pod, 0),
 			}
@@ -166,13 +167,13 @@ func (maker *learningTaskMaker) run() {
 				lt.nrRequiredReplicas += int(*r.Replicas)
 			}
 
-			maker.learningTasks[jobName] = lt
+			maker.learningTasks[jobId] = lt
 
-			if pods, ok := maker.orphanPods[jobName]; ok {
+			if pods, ok := maker.orphanPods[jobId]; ok {
 				lt.pods = pods
 
 				if len(lt.pods) == lt.nrRequiredReplicas {
-					fmt.Printf("lt job %s requires %d pods and all of them are ready, launching\n", jobName, lt.nrRequiredReplicas)
+					fmt.Printf("lt job %s requires %d pods and all of them are ready, launching\n", jobId, lt.nrRequiredReplicas)
 					maker.ltCh <- lt
 				}
 			}
