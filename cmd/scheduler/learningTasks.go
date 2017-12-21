@@ -90,8 +90,8 @@ func tfJobWatch(jobch chan *spec.TfJob, c *kubernetes.Clientset) {
 		os.Exit(1)
 	}
 
-	if 0 < len(list.Items) {
-		jobch <- &list.Items[0]
+	for i := range list.Items {
+		jobch <- &list.Items[i]
 	}
 
 	version := list.Metadata.ResourceVersion
@@ -107,16 +107,31 @@ func tfJobWatch(jobch chan *spec.TfJob, c *kubernetes.Clientset) {
 		}
 
 		decoder := json.NewDecoder(bytes.NewReader(body))
-		ev, st, err := pollEvent(decoder)
-		if st != nil || err != nil {
-			fmt.Printf("decoding resp body failed: %v %v\n", st, err)
-			os.Exit(1)
+
+		for {
+			ev, st, err := pollEvent(decoder)
+
+			if err != nil {
+				if err == io.EOF { // apiserver will close stream periodically
+					fmt.Printf("apiserver closed stream")
+					break
+				}
+
+				fmt.Errorf("received invalid event from API server: %v", err)
+				os.Exit(1)
+			}
+
+			if st != nil {
+				fmt.Printf("status: %v\n", st)
+				os.Exit(1)
+			}
+
+			if ev.Object.Spec.RuntimeId != "" {
+				fmt.Printf("added job: %v\n", ev.Object)
+				jobch <- ev.Object
+			}
+			version = ev.Object.Metadata.ResourceVersion
 		}
-
-		fmt.Printf("received tfjob object: %v\n", ev.Object.Spec.RuntimeId)
-
-		jobch <- ev.Object
-		version = ev.Object.Metadata.ResourceVersion
 	}
 }
 
@@ -127,19 +142,17 @@ func (maker *learningTaskMaker) run() {
 	for {
 		select {
 		case pod := <-maker.podCh:
-
 			fmt.Printf("learningTaskMaker: handling newly arrived pod %s\n", pod.PodInfo.Name)
 			var lt *learningTask
 			var ok bool
 			jobId := pod.PodInfo.Labels["runtime_id"]
+			fmt.Printf("job id of newly arrived pod: %s\n", jobId)
 			if lt, ok = maker.learningTasks[jobId]; !ok {
 				// tf job object isn't observed
-				var orphans []*k8stype.Pod
-				if orphans, ok = maker.orphanPods[jobId]; !ok {
+				if _, ok = maker.orphanPods[jobId]; !ok {
 					maker.orphanPods[jobId] = make([]*k8stype.Pod, 0)
-					orphans = maker.orphanPods[jobId]
 				}
-				orphans = append(orphans, pod)
+				maker.orphanPods[jobId] = append(maker.orphanPods[jobId], pod)
 			} else {
 				lt.pods = append(lt.pods, pod)
 
@@ -166,10 +179,16 @@ func (maker *learningTaskMaker) run() {
 			for _, r := range job.Spec.ReplicaSpecs {
 				lt.nrRequiredReplicas += int(*r.Replicas)
 			}
+			if lt.nrRequiredReplicas == 0 {
+				fmt.Printf("invalid nr replicas, skipping %s\n", jobId)
+				continue
+			}
+			fmt.Printf("# of pods belong to the job %s: %d\n", jobId, lt.nrRequiredReplicas)
 
 			maker.learningTasks[jobId] = lt
 
 			if pods, ok := maker.orphanPods[jobId]; ok {
+				fmt.Printf("job %s has %d orphan pods: %v\n", jobId, len(pods), pods)
 				lt.pods = pods
 
 				if len(lt.pods) == lt.nrRequiredReplicas {
